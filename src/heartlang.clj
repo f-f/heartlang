@@ -39,7 +39,7 @@ Syntax:
 ;; (and a Clojure-compatible subset of it, e.g. we have to use `:-`
 ;; for type annotations) to get AST by walking the tree.
 ;;
-(defn parse' [expr]
+(defn parse [expr]
   (condp #(%1 %2) expr
     nat-int? {:op :nat
               :data {:n expr}}
@@ -54,50 +54,47 @@ Syntax:
                       _ (assert (symbol? arg))]
                  {:op :lam
                   :data {:sym (str arg)
-                         :typ (parse' typ)
-                         :body (parse' (nth expr 2))}})
+                         :typ (parse typ)
+                         :body (parse (nth expr 2))}})
             'let (let [[arg value] (second expr)
                        _ (assert (symbol? arg))]
                    {:op :let
                     :data {:sym (str arg)
-                           :value (parse' value)
-                           :body (parse' (nth expr 2))}})
+                           :value (parse value)
+                           :body (parse (nth expr 2))}})
             '+ {:op :add
-                :data {:a (parse' (nth expr 1))
-                       :b (parse' (nth expr 2))}}
+                :data {:a (parse (nth expr 1))
+                       :b (parse (nth expr 2))}}
             '-> {:op :pi
-                 :data {:a (parse' (nth expr 1))
-                        :b (parse' (nth expr 2))}}
+                 :data {:a (parse (nth expr 1))
+                        :b (parse (nth expr 2))}}
             (loop [more (nnext expr)
                    app {:op :app
-                        :data {:f (parse' (first expr))
-                               :a (parse' (second expr))}}]
+                        :data {:f (parse (first expr))
+                               :a (parse (second expr))}}]
               (if-not (seq more)
                 app
                 (recur (rest more)
                        {:op :app
                         :data {:f app
-                               :a (parse' (first more))}}))))
+                               :a (parse (first more))}}))))
     (str "ERROR: wasn't able to parse: " expr)))
-
-(defmacro parse [expr]
-  (parse' expr))
 
 
 ;; Testing parsing
 
 (parse 42)
-(parse x)
-(parse Natural)
-(parse (fn [x :- y] z))
-(parse (+ x 42))
-(parse (fn [x :- Natural] (+ x 42)))
-(parse ((fn [f :- (-> Natural Natural)]
-          (f 42))
-        (fn [x :- Natural] (+ x 1))))
-(parse (let [x 1]
-         (let [y 2]
-           (+ x y))))
+(parse 'x)
+(parse 'Natural)
+(parse '(fn [x :- y] z))
+(parse '(+ x 42))
+(parse '(fn [x :- Natural] (+ x 42)))
+(parse '((fn [f :- (-> Natural Natural)]
+           (f 42))
+         (fn [x :- Natural] (+ x 1))))
+(parse '(let [x 1]
+          (let [y 2]
+            (+ x y))))
 
 
 ;; Bonus section: pretty printing
@@ -224,36 +221,38 @@ Syntax:
 
 ;; Testing typecheck
 
-(defmacro check [expr]
-  (typecheck (parse' expr) '()))
+(defn check [expr]
+  (-> expr
+     parse
+     (typecheck '())))
 
 (check 42)
 ;; Typechecking works, no unbound variables allowed
-;; (check x)
-;; (check (fn [x :- y] z))
-(check (fn [x :- Natural] x))
+;; (check 'x)
+;; (check '(fn [x :- y] z))
+(check '(fn [x :- Natural] x))
 
-(check Natural)
+(check 'Natural)
 ;; + is a builtin so it's special and doesn't typecheck in isolation
-;; (check +)
-(check (+ 1 2))
-(check (fn [x :- Natural] (+ x 42))) ;; But we can apply it to things with no problem
-(check ((fn [x :- Natural] (+ x 42)) 1))
+;; (check '+)
+(check '(+ 1 2))
+(check '(fn [x :- Natural] (+ x 42))) ;; But we can apply it to things with no problem
+(check '((fn [x :- Natural] (+ x 42)) 1))
 
 ;; This is not System F, as we don't have polymorphism
-;; (check Type)
-;; (check (fn [x :- Type] (fn [y :- x] y)))  ;; <- Identity function
+;; (check 'Type)
+;; (check '(fn [x :- Type] (fn [y :- x] y)))  ;; <- Identity function
 
 ;; You can pass functions too!
-(check ((fn [f :- (-> Natural Natural)]
-          (f 42))
-        (fn [x :- Natural] (+ x 1))))
+(check '((fn [f :- (-> Natural Natural)]
+           (f 42))
+         (fn [x :- Natural] (+ x 1))))
 
 ;; Shadowing works correctly
-(check ((fn [x :- (-> Natural Natural)]
-          ((fn [x :- Natural] x)
-           42))
-        (fn [x :- Natural] x)))
+(check '((fn [x :- (-> Natural Natural)]
+           ((fn [x :- Natural] x)
+            42))
+         (fn [x :- Natural] x)))
 
 
 
@@ -326,56 +325,56 @@ Syntax:
 
 ;; Test normalisation
 
-(defmacro run [expr]
-  (let [e (parse' expr)
+(defn run [expr]
+  (let [e (parse expr)
         _ (typecheck e '())]
     ;; (println "")
     (-> (normalise e '())
        pretty
-       str)))
+       )))
        ;; clojure.pprint/pprint)))
 
 
 (run 42)
-(run (fn [x :- Natural] x))
-(run ((fn [x :- Natural] x) 42))
+(run '(fn [x :- Natural] x))
+(run '((fn [x :- Natural] x) 42))
 
-(run ((fn [y :- Natural]
-        ((fn [x :- Natural] x)
-         y))
-      42))
+(run '((fn [y :- Natural]
+         ((fn [x :- Natural] x)
+          y))
+       42))
 
-(run Natural)
+(run 'Natural)
 
-;; (run Type)
-;; (run x)
-;; (run (fn [x :- y] z))
-;; (run +)
+;; (run 'Type)
+;; (run 'x)
+;; (run '(fn [x :- y] z))
+;; (run '+)
 
-(run (+ 1 2))
-(run (fn [x :- Natural]
-       (+ x 42)))
-(run ((fn [x :- Natural]
-        (+ x 42))
-      1))
+(run '(+ 1 2))
+(run '(fn [x :- Natural]
+        (+ x 42)))
+(run '((fn [x :- Natural]
+         (+ x 42))
+       1))
 
-(run (fn [x :- Natural]
-       (fn [y :- Natural]
-         (fn [z :- Natural]
-           (+ y z)))))
+(run '(fn [x :- Natural]
+        (fn [y :- Natural]
+          (fn [z :- Natural]
+            (+ y z)))))
 
-(run (let [x 1]
-       x))
+(run '(let [x 1]
+        x))
 
 ;; Shadowing
-(run ((fn [x :- Natural]
-        ((fn [x :- Natural] x)
-         17))
-      42))
+(run '((fn [x :- Natural]
+         ((fn [x :- Natural] x)
+          17))
+       42))
 
-(run ((fn [f :- (-> Natural Natural)]
-        (f 42))
-      (fn [x :- Natural] (+ x 1))))
+(run '((fn [f :- (-> Natural Natural)]
+         (f 42))
+       (fn [x :- Natural] (+ x 1))))
 
 
 
@@ -394,7 +393,7 @@ Syntax:
               (java.io.PushbackReader.
                (clojure.java.io/reader
                 (.getBytes in))))
-        expr (parse' expr)
+        expr (parse expr)
         _ (typecheck expr '())]
     (-> (normalise expr '())
        pretty
