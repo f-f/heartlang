@@ -4,6 +4,10 @@
    [clojure.edn])
   (:gen-class))
 
+
+
+
+
 (def help
   "
 
@@ -17,10 +21,20 @@ Syntax:
 - Function type: (-> Natural Natural)
 - Lambdas:       (fn [argument :- type] body)
 - Application:   (some-function argument)
-- Let:           (let [name definition] body)
 - Addition:      (+ e1 e2)
 
 ")
+
+
+
+
+
+
+
+
+
+
+
 
 
 ;; Stage warning
@@ -31,13 +45,51 @@ Syntax:
 ;; clear, especially if the implementation has type inference.
 
 
+
+
+
+
+
 ;; "Parsing"
 ;;
 ;; Here we skip all the fancy parser stuff and just use lispy syntax
 ;; (and a Clojure-compatible subset of it, e.g. we have to use `:-`
 ;; for type annotations) to get AST by walking the tree.
 ;;
-(defn parse [expr])
+(defn parse [expr]
+  (condp #(%1 %2) expr
+    nat-int? {:op :nat
+              :data {:n expr}}
+    symbol? (condp = expr
+              'Natural {:op :Natural}
+              '+ {:op :add}
+              {:op :var
+               :data {:sym (str expr)}})
+    list? (condp = (first expr)
+            'fn (let [[arg col typ] (second expr)
+                     _ (assert (= col :-))
+                     _ (assert (symbol? arg))]
+                 {:op :lam
+                  :data {:sym (str arg)
+                         :typ (parse typ)
+                         :body (parse (nth expr 2))}})
+            '+ {:op :add
+                :data {:a (parse (nth expr 1))
+                       :b (parse (nth expr 2))}}
+            '-> {:op :pi
+                :data {:a (parse (nth expr 1))
+                       :b (parse (nth expr 2))}}
+            (loop [more (nnext expr)
+                   app {:op :app
+                        :data {:f (parse (first expr))
+                               :a (parse (second expr))}}]
+              (if-not (seq more)
+                app
+                (recur (rest more)
+                       {:op :app
+                        :data {:f app
+                               :a (parse (first more))}}))))
+    (str "ERROR: wasn't able to parse: " expr)))
 
 
 
@@ -48,11 +100,21 @@ Syntax:
 
 ;; Testing parsing
 
+(parse 42)
 
+(parse 'x)
 
+(parse 'Natural)
 
+(parse '(fn [x :- y] z))
 
+(parse '(+ x 42))
 
+(parse '(fn [x :- Natural] (+ x 42)))
+
+(parse '((fn [f :- (-> Natural Natural)]
+           (f 42))
+         (fn [x :- Natural] (+ x 1))))
 
 
 
@@ -130,6 +192,8 @@ Syntax:
 
 
 
+
+
 ;; Typecheck
 ;;
 ;; We implement Simply Typed Lambda Calculus:
@@ -141,7 +205,47 @@ Syntax:
 ;; mentioned in comments below.
 ;;
 
-(defn typecheck [expr ctx])
+(defn throw-unbound [expr]
+  (throw (Exception. (str "Unbound variable: " expr))))
+(defn throw-invalid-pi [a b]
+  (throw (Exception. (str "Invalid in or out type: " a b))))
+(defn throw-type-app-mismatch [f a]
+  (throw (Exception. (str "Tried to apply fn to wrong type: " f a))))
+(defn throw-type-plus-mismatch [a b]
+  (throw (Exception. (str "Tried to apply + to wrong types: " a b))))
+(defn throw-wrong-fn-type [f]
+  (throw (Exception. (str "Unsupported function type: " f))))
+
+
+
+
+(defn typecheck [expr ctx]
+  (condp = (:op expr)
+    ;; 1. vars should be in context
+
+
+    ;; 2. constants have a type
+
+
+    ;; 3. Lambda: if adding x : S to context gives e : T,
+    ;; then the lambda has type S -> T
+
+
+    ;; 3.5 Lambda types: type annotations must only contain types
+
+
+    ;; 4. Application: if f : S -> T and a : S are in context
+    ;; then (f a) : T
+
+
+    ;; Extension: Naturals
+
+    ))
+
+
+
+
+
 
 
 
@@ -160,6 +264,32 @@ Syntax:
      parse
      (typecheck '())))
 
+
+(check 42)
+
+;; No unbound variables allowed
+;; (check 'x)
+;; (check '(fn [x :- y] z))
+
+(check '(fn [x :- Natural] x))
+
+
+(check 'Natural)
+
+(check '(+ 1 2))
+(check '(fn [x :- Natural] (+ x 42)))
+(check '((fn [x :- Natural] (+ x 42)) 1))
+
+;; You can pass functions too!
+(check '((fn [f :- (-> Natural Natural)]
+           (f 42))
+         (fn [x :- Natural] (+ x 1))))
+
+;; Shadowing works properly
+(check '((fn [x :- (-> Natural Natural)]
+           ((fn [x :- Natural] x)
+            42))
+         (fn [x :- Natural] x)))
 
 
 
@@ -211,3 +341,85 @@ Syntax:
         _ (typecheck e '())]
     (-> (normalise e '())
        pretty)))
+
+
+
+(run 42)
+
+(run '(fn [x :- Natural] x))
+
+;; But what if we apply the function?
+(run '((fn [x :- Natural] x) 42))
+
+
+(run 'Natural)
+
+
+(run '(+ 1 2))
+
+(run '(fn [x :- Natural]
+        (+ x 42)))
+
+(run '((fn [x :- Natural]
+         (+ x 42))
+       1))
+
+;; Nested functions carry on the environments properly
+(run '(fn [x :- Natural]
+        (fn [y :- Natural]
+          (fn [z :- Natural]
+            (+ y z)))))
+
+;; Shadowing evaluates nicely
+(run '((fn [x :- Natural]
+         ((fn [x :- Natural] x)
+          17))
+       42))
+
+;; Passing in functions works too
+(run '((fn [f :- (-> Natural Natural)]
+         (f 42))
+       (fn [x :- Natural] (+ x 1))))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+;; Bonus section: run programs from stdin
+;;
+;;  If you have the `clj` tool you can just put this file in a `src`
+;;  folder and evaluate Heartlang expressions from the terminal like so:
+;;
+;;  $ clj -m heartlang <<< "(let [x 23] (let [y 19] (+ x y)))"
+;;
+;;  => 42
+;;
+(defn -main [& args]
+  (let [in (slurp *in*)
+        expr (clojure.edn/read
+              (java.io.PushbackReader.
+               (clojure.java.io/reader
+                (.getBytes in))))
+        expr (parse expr)
+        _ (typecheck expr '())]
+    (-> (normalise expr '())
+        pretty
+        clojure.pprint/pprint)))
