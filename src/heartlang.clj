@@ -84,17 +84,21 @@ Syntax:
 ;; Testing parsing
 
 (parse 42)
+
 (parse 'x)
+
 (parse 'Natural)
+
 (parse '(fn [x :- y] z))
+
 (parse '(+ x 42))
+
 (parse '(fn [x :- Natural] (+ x 42)))
+
 (parse '((fn [f :- (-> Natural Natural)]
            (f 42))
          (fn [x :- Natural] (+ x 1))))
-(parse '(let [x 1]
-          (let [y 2]
-            (+ x y))))
+
 
 
 ;; Bonus section: pretty printing
@@ -119,6 +123,12 @@ Syntax:
           (list '-> (pretty a) (pretty b)))))
 
 
+(-> '(+ x 42) parse)
+
+(-> '(+ x 42) parse pretty)
+
+
+
 ;; Towards typechecking
 ;;
 ;; When typechecking and evaluating a program, it is necessary to
@@ -135,11 +145,7 @@ Syntax:
   (cons [sym val] env))
 
 (defn env-lookup [env sym]
-  (when (seq env)
-    (let [[sym-e v] (first env)]
-      (if (= sym sym-e)
-        v
-        (recur (rest env) sym)))))
+  (-> env (filter (fn [[sym-e v]] (= sym-e sym))) first second))
 
 (def ctx-lookup env-lookup)
 (def ctx-insert env-insert)
@@ -155,18 +161,48 @@ Syntax:
 ;; See the above link or the slides for the four typing rules
 ;; mentioned in comments below.
 ;;
+
+(defn throw-unbound [expr]
+  (throw (Exception. (str "Unbound variable: " expr))))
+(defn throw-invalid-pi [a b]
+  (throw (Exception. (str "Invalid in or out type: " a b))))
+(defn throw-type-app-mismatch [f a]
+  (throw (Exception. (str "Tried to apply fn to wrong type: " f a))))
+(defn throw-type-plus-mismatch [a b]
+  (throw (Exception. (str "Tried to apply + to wrong types: " a b))))
+(defn throw-wrong-fn-type [f]
+  (throw (Exception. (str "Unsupported function type: " f))))
+
+
 (defn typecheck [expr ctx]
   (condp = (:op expr)
+
     ;; 1. vars should be in context
+    ;;
+    ;; {:op :var :data {:sym "x"}}
+    ;;
     :var (if-let [typ (ctx-lookup ctx (-> expr :data :sym))]
            typ
-           (throw (Exception. (str "Unbound variable " expr))))
+           (throw-unbound expr))
+
 
     ;; 2. constants have a type
+    ;;
+    ;; {:op :nat :data {:n 42}}
+    ;; {:op :Natural}
+    ;;
     :Natural {:op :Type}
     :nat     {:op :Natural}
 
-    ;; 3. Lambda: if adding x : t1 to context gives e : t2, then the lambda has type x:t1 -> t2
+
+    ;; 3. Lambda: if adding x : S to context gives e : T,
+    ;; then the lambda has type S -> T
+    ;;
+    ;; {:op :lam
+    ;;  :data {:sym "x"
+    ;;         :typ {:op :Natural}
+    ;;         :body {:op :var :data {:sym "x"}}}}
+    ;;
     :lam (let [{:keys [sym typ body]} (:data expr)
                _ (typecheck typ ctx)
                new-ctx (ctx-insert ctx sym typ)
@@ -175,24 +211,38 @@ Syntax:
                _ (typecheck pi ctx)]
            pi)
 
-    ;; 3.5. Lambda types: type annotations must only contain types
+
+    ;; 3.5 Lambda types: type annotations must only contain types
+    ;;
+    ;; {:op :pi :data {:a {:op :Natural} :b {:op :Natural}}}
+    ;;
     :pi (let [{:keys [a b]} (:data expr)
               a' (typecheck a ctx)
               b' (typecheck b ctx)]
           (if (and (= :Type (:op a'))
                    (= :Type (:op b')))
             {:op :Type}
-            (throw (Exception. (str "Invalid input or output type: " a' b')))))
+            (throw-invalid-pi a' b')))
 
-    ;; 4. Application: f : t1 -> t2 and a : t1 in the context, then (f a) : t2
+
+    ;; 4. Application: if f : S -> T and a : S are in context
+    ;; then (f a) : T
+    ;;
+    ;; {:op :app
+    ;;  :data {:f {:op :lam
+    ;;             :data {:sym "x"
+    ;;                    :typ {:op :Natural}
+    ;;                    :body {:op :var :data {:sym "x"}}}}
+    ;;         :a {:op :nat :data {:n 42}}}}
+    ;;
     :app (let [{:keys [f a]} (:data expr)
                f-typ (typecheck f ctx)
                a-typ (typecheck a ctx)]
            (if (= :pi (:op f-typ))
              (if (= a-typ (-> f-typ :data :a))
                (-> f-typ :data :b)
-               (throw (Exception. (str "Type mismatch: tried to apply function to the wrong type:\n\n" f-typ "\n\n" a-typ))))
-             (throw (Exception. (str "Unsupported function type: " f-typ)))))
+               (throw-type-app-mismatch f-typ a-typ))
+             (throw-wrong-fn-type f-typ)))
 
 
     ;; Extensions to the core STLC
@@ -208,13 +258,19 @@ Syntax:
                            :a value}}]
            (typecheck app ctx))
 
-    ;; + is Natural -> Natural -> Natural
+
+    ;; Extension: Natural addition
+    ;;
+    ;; {:op :add
+    ;;  :data {:a {:op :nat :data {:n 42}}
+    ;;         :b {:op :nat :data {:n 17}}}}
+    ;;
     :add (let [{:keys [a b]} (:data expr)
                a-typ (typecheck a ctx)
                b-typ (typecheck b ctx)]
            (if (or (not= :Natural (:op a-typ))
                    (not= :Natural (:op b-typ)))
-             (throw (Exception. (str "Tried to apply + to wrong types: " a-typ b-typ)))
+             (throw-type-plus-mismatch a-typ b-typ)
              {:op :Natural}))))
 
 
@@ -227,32 +283,25 @@ Syntax:
      (typecheck '())))
 
 (check 42)
-;; Typechecking works, no unbound variables allowed
+
+;; No unbound variables allowed
 ;; (check 'x)
 ;; (check '(fn [x :- y] z))
+
 (check '(fn [x :- Natural] x))
 
+
 (check 'Natural)
-;; + is a builtin so it's special and doesn't typecheck in isolation
-;; (check '+)
+
 (check '(+ 1 2))
 (check '(fn [x :- Natural] (+ x 42))) ;; But we can apply it to things with no problem
 (check '((fn [x :- Natural] (+ x 42)) 1))
 
-;; This is not System F, as we don't have polymorphism
-;; (check 'Type)
-;; (check '(fn [x :- Type] (fn [y :- x] y)))  ;; <- Identity function
 
 ;; You can pass functions too!
 (check '((fn [f :- (-> Natural Natural)]
            (f 42))
          (fn [x :- Natural] (+ x 1))))
-
-;; Shadowing works correctly
-(check '((fn [x :- (-> Natural Natural)]
-           ((fn [x :- Natural] x)
-            42))
-         (fn [x :- Natural] x)))
 
 
 
@@ -336,42 +385,39 @@ Syntax:
 
 
 (run 42)
+
 (run '(fn [x :- Natural] x))
+
+;; But what if we apply the function?
 (run '((fn [x :- Natural] x) 42))
 
-(run '((fn [y :- Natural]
-         ((fn [x :- Natural] x)
-          y))
-       42))
 
 (run 'Natural)
 
-;; (run 'Type)
-;; (run 'x)
-;; (run '(fn [x :- y] z))
-;; (run '+)
 
 (run '(+ 1 2))
+
 (run '(fn [x :- Natural]
         (+ x 42)))
+
 (run '((fn [x :- Natural]
          (+ x 42))
        1))
 
+;; Nested functions carry on the environments properly
 (run '(fn [x :- Natural]
         (fn [y :- Natural]
           (fn [z :- Natural]
             (+ y z)))))
 
-(run '(let [x 1]
-        x))
 
-;; Shadowing
+;; Shadowing evaluates nicely
 (run '((fn [x :- Natural]
          ((fn [x :- Natural] x)
           17))
        42))
 
+;; Passing functions in works too
 (run '((fn [f :- (-> Natural Natural)]
          (f 42))
        (fn [x :- Natural] (+ x 1))))

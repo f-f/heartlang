@@ -151,6 +151,10 @@ Syntax:
 
 
 
+(-> '(+ x 42) parse)
+
+(-> '(+ x 42) parse pretty)
+
 
 
 
@@ -173,10 +177,14 @@ Syntax:
 ;; - `ctx` binds names to types
 ;; - `env` binds names to values
 
+(defn env-insert [env sym val]
+  (cons [sym val] env))
 
+(defn env-lookup [env sym]
+  (-> env (filter (fn [[sym-e v]] (= sym-e sym))) first second))
 
-
-
+(def ctx-lookup env-lookup)
+(def ctx-insert env-insert)
 
 
 
@@ -221,24 +229,65 @@ Syntax:
 
 (defn typecheck [expr ctx]
   (condp = (:op expr)
+
     ;; 1. vars should be in context
+    ;;
+    ;; {:op :var :data {:sym "x"}}
+    ;;
+    :var "TODO"
 
 
     ;; 2. constants have a type
+    ;;
+    ;; {:op :nat :data {:n 42}}
+    ;; {:op :Natural}
+    ;;
+    :nat "TODO"
+    :Natural "TODO"
 
 
     ;; 3. Lambda: if adding x : S to context gives e : T,
     ;; then the lambda has type S -> T
+    ;;
+    ;; {:op :lam
+    ;;  :data {:sym "x"
+    ;;         :typ {:op :Natural}
+    ;;         :body {:op :var :data {:sym "x"}}}}
+    ;;
+    :lam (let [{:keys [sym typ body]} (:data expr)]
+           "TODO")
 
 
     ;; 3.5 Lambda types: type annotations must only contain types
+    ;;
+    ;; {:op :pi :data {:a {:op :Natural} :b {:op :Natural}}}
+    ;;
+    :pi (let [{:keys [a b]} (:data expr)]
+          "TODO")
 
 
     ;; 4. Application: if f : S -> T and a : S are in context
     ;; then (f a) : T
+    ;;
+    ;; {:op :app
+    ;;  :data {:f {:op :lam
+    ;;             :data {:sym "x"
+    ;;                    :typ {:op :Natural}
+    ;;                    :body {:op :var :data {:sym "x"}}}}
+    ;;         :a {:op :nat :data {:n 42}}}}
+    ;;
+    :app (let [{:keys [f a]} (:data expr)]
+           "TODO")
 
 
-    ;; Extension: Naturals
+    ;; Extension: Natural addition
+    ;;
+    ;; {:op :add
+    ;;  :data {:a {:op :nat :data {:n 42}}
+    ;;         :b {:op :nat :data {:n 17}}}}
+    ;;
+    :add (let [{:keys [a b]} (:data expr)]
+           "TODO")
 
     ))
 
@@ -268,8 +317,8 @@ Syntax:
 (check 42)
 
 ;; No unbound variables allowed
-;; (check 'x)
-;; (check '(fn [x :- y] z))
+;;(check 'x)
+;;(check '(fn [x :- y] z))
 
 (check '(fn [x :- Natural] x))
 
@@ -284,14 +333,6 @@ Syntax:
 (check '((fn [f :- (-> Natural Natural)]
            (f 42))
          (fn [x :- Natural] (+ x 1))))
-
-;; Shadowing works properly
-(check '((fn [x :- (-> Natural Natural)]
-           ((fn [x :- Natural] x)
-            42))
-         (fn [x :- Natural] x)))
-
-
 
 
 
@@ -317,7 +358,40 @@ Syntax:
 ;; The actual work happens when handling `app` nodes, everything
 ;; else is kind of accessory work (to prevent name collisions, etc.)
 ;;
-(defn normalise [expr env])
+(defn normalise [expr env]
+  (condp = (:op expr)
+    ;; Just replace a var with the value in the env
+    :var (or (env-lookup env (-> expr :data :sym))
+             expr)
+
+    ;; Generate fresh names for all bindings
+    :lam (let [{:keys [sym typ body]} (:data expr)
+               new-sym (str (gensym))
+               new-env (env-insert env sym {:op :var :data {:sym new-sym}})]
+           {:op :lam
+            :data {:sym new-sym
+                   :typ (normalise typ env)
+                   :body (normalise body new-env)}})
+
+
+
+    ;; Apply lambdas: this is the actual application of beta-normalization
+    :app (let [{:keys [f a]} (:data expr)]
+           "TODO")
+
+
+    ;; Extension: natural addition
+    :add (let [{:keys [a b]} (:data expr)
+               a' (normalise a env)
+               b' (normalise b env)]
+           (if (and (= :nat (:op a'))
+                    (= :nat (:op b')))
+             {:op :nat :data {:n (+ (-> a' :data :n) (-> b' :data :n))}}
+             {:op :add :data {:a a' :b b'}}))
+
+    ;; Fallback case
+    expr
+    ))
 
 
 
