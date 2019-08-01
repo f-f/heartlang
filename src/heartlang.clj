@@ -145,7 +145,7 @@ Syntax:
   (cons [sym val] env))
 
 (defn env-lookup [env sym]
-  (-> env (filter (fn [[sym-e v]] (= sym-e sym))) first second))
+  (->> env (filter (fn [[sym-e v]] (= sym-e sym))) first second))
 
 (def ctx-lookup env-lookup)
 (def ctx-insert env-insert)

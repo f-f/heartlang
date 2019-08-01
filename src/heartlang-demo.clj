@@ -11,7 +11,8 @@
 (def help
   "
 
-Heartlang is a single-file implementation of Simply Typed Lambda Calculus,
+Heartlang is a single-file implementation of
+Simply Typed Lambda Calculus,
 with Naturals and Clojur-ish syntax
 
 Syntax:
@@ -167,13 +168,17 @@ Syntax:
 
 ;; Towards typechecking
 ;;
-;; When typechecking and evaluating a program, it is necessary to
-;; keep track of what has been evaluated before and bound to various
-;; symbols. We call that "context" when typechecking, and "environment"
-;; when evaluating.
-;; Here they are both going to have the same implementation - a list to
-;; which we `cons` fresh names when we encounter new bindings - but they
-;; have different semantics:
+;; When typechecking and evaluating a program,
+;; it is necessary to keep track of what has
+;; been evaluated before and bound to various
+;; symbols. We call that "context" when
+;; typechecking, and "environment" when
+;; evaluating.
+;; Here they are both going to have the same
+;; implementation - a list to
+;; which we `cons` fresh names when we encounter
+;; new bindings - but they have different
+;; semantics:
 ;; - `ctx` binds names to types
 ;; - `env` binds names to values
 
@@ -181,7 +186,10 @@ Syntax:
   (cons [sym val] env))
 
 (defn env-lookup [env sym]
-  (-> env (filter (fn [[sym-e v]] (= sym-e sym))) first second))
+  (->> env
+       (filter (fn [[sym-e v]] (= sym-e sym)))
+       first
+       second))
 
 (def ctx-lookup env-lookup)
 (def ctx-insert env-insert)
@@ -280,15 +288,21 @@ Syntax:
            "TODO")
 
 
+
+
     ;; Extension: Natural addition
     ;;
     ;; {:op :add
     ;;  :data {:a {:op :nat :data {:n 42}}
     ;;         :b {:op :nat :data {:n 17}}}}
     ;;
-    :add (let [{:keys [a b]} (:data expr)]
-           "TODO")
-
+    :add (let [{:keys [a b]} (:data expr)
+               a-typ (typecheck a ctx)
+               b-typ (typecheck b ctx)]
+           (if (or (not= :Natural (:op a-typ))
+                   (not= :Natural (:op b-typ)))
+             (throw-type-plus-mismatch a-typ b-typ)
+             {:op :Natural}))
     ))
 
 
@@ -375,9 +389,20 @@ Syntax:
 
 
 
-    ;; Apply lambdas: this is the actual application of beta-normalization
-    :app (let [{:keys [f a]} (:data expr)]
-           "TODO")
+    ;; Apply lambdas: this is the actual equational operation
+    :app (let [{:keys [f a]} (:data expr)
+               f' (normalise f env)
+               a' (normalise a env)]
+           (if (= :lam (:op f'))
+             ;; Normal case: we apply a lambda to a value
+             (let [{:keys [sym typ body]} (:data f')
+                   new-env (env-insert env sym a')]
+               (normalise body new-env))
+             ;; Otherwise we just normalise the bodies
+             {:op :app
+              :data {:f f'
+                     :a a'}}))
+
 
 
     ;; Extension: natural addition
@@ -459,6 +484,18 @@ Syntax:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+;; That's it!
 
 
 
